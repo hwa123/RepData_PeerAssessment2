@@ -1,0 +1,133 @@
+---
+title: "Reproducible Research: Peer Assessment 2"
+output: 
+  html_document:
+    keep_md: true
+---
+Created by H.Wang on November 21, 2015
+
+## Title
+Impact of Severe Weather Events on Public Health and Economy in the United States
+
+## Synonpsis  
+The project is aimed to analyze the impact of different weather events on public health and economy based on U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database which events were recorded from 1950 to 2011. The analysis will around the estimates of fatalities, injuries, property damage to decide which types of event are most harmful with respect to the population health and economy. 
+
+## Basic Settings
+```{r echo = TRUE}
+library(ggplot2)
+library(plyr)
+library(gridExtra)
+```
+
+## Loading and preprocessing the data
+```{r echo = TRUE, cache=TRUE}
+# 1. Load the data
+setwd("~/Desktop/Downloads/R/Reproducible Research") #set directory
+
+if (!"stormData.csv.bz2" %in% dir("./")) {
+    download.file("http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", destfile =
+                 "stormData.csv.bz2")
+}
+
+if(!"stormData" %in% ls()) {
+        stormData <- read.csv("stormData.csv.bz2", sep = ",")
+}
+
+dim(stormData)
+
+summary(stormData)
+```
+
+The data has total up 902297 rows and 37 columns, most of the event beginning date were recorded in year 2011, following up next I am going to plot histogram and then analyze data based on the events frequency.
+
+```{r echo = TRUE, cache=TRUE}
+# 2. Process/Transform the data
+stormData$year <- as.numeric(format(as.Date(stormData$BGN_DATE, format = "%m/%d/%Y %H:%M:%S"), "%Y")) ## add one more column to record events start years
+
+ggplot(data = stormData, aes(x = stormData$year )) + geom_histogram(aes(y = ..count..),binwidth = 0.5, color = I("black")) 
+
+new_stormData <- stormData[stormData$year >= 1995, ] #create subset data with year > 1995
+dim(new_stormData)
+```
+
+In the earlier years few events are recorded, most likely due to a lack of good records. Starting from year 1995 the events tracked start to increase significantly. Thus, I will use the subset of the data after 1995 to get most out of good records.
+
+## Analysis of weather events impact on population health
+According to the summary of data, columns **FATALITIES** and **INJURIES** are related to population health, thus I am going to check the fatalities and injuries that are caused by severe weather, list the top 20 most severe type of weather events. 
+```{r echo = TRUE, cache=TRUE}
+data_extraction <- function(fieldname, top = 20, dataset = stormData) {
+        index <- which(colnames(dataset) == fieldname)
+        field <- aggregate(dataset[, index], by = list(dataset$EVTYPE), FUN = "sum")
+        names(field) <- c("EVTYPE", fieldname)
+        field <- arrange(field, field[, 2], decreasing = T)
+        field <- head(field, n = top)
+        field <- within(field, EVTYPE <- factor(x = EVTYPE, levels = field$EVTYPE))
+        return(field)
+}
+
+fatalities <- data_extraction("FATALITIES", dataset = new_stormData)
+head(fatalities) # display fatalities data
+
+injuries <- data_extraction("INJURIES", dataset = new_stormData)
+head(injuries) # display injuries data
+
+# plot weather events distribution correspond to numbers of injuries as well as fatalities
+fatalities_plot <- qplot(EVTYPE, data = fatalities, weight = FATALITIES, geom = "bar", binwidth = 1) + 
+    scale_y_continuous("Number of Fatalities") + 
+    theme(axis.text.x = element_text(angle = 45, 
+    hjust = 1)) + xlab("Severe Weather Type") + 
+    ggtitle("Total Fatalities Caused By \n Severe Weather Events In U.S.\n From 1995 - 2011")
+
+injuries_plot <- qplot(EVTYPE, data = injuries, weight = INJURIES, geom = "bar", binwidth = 1) + 
+    scale_y_continuous("Number of Injuries") + 
+    theme(axis.text.x = element_text(angle = 45, 
+    hjust = 1)) + xlab("Severe Weather Type") + 
+    ggtitle("Total Injuries Caused By \n Severe Weather Events In U.S.\n From 1995 - 2011")
+
+grid.arrange(fatalities_plot, injuries_plot, ncol = 2) #merge plots 
+options(scipen = 1) # turn off scientific notation
+```
+
+Based on the above histograms, the fatalities was mostly caused by **excessive heat** (with `r fatalities$FATALITIES[[1]]` records) and **tornado** (with `r fatalities$FATALITIES[[2]]` records), while injuries was mostly caused by **tornato** (with `r injuries$INJURIES[[1]]` records) in the United States from 1995 to 2011.
+
+## Analysis of weather events impact on economy
+The data in column **PROPDMG** and **CROPDMG** need to be converted into comparable numerical forms according to the meaning of units described in the code book ([Storm Events](http://ire.org/nicar/database-library/databases/storm-events/)). Both **`PROPDMGEXP`** and **`CROPDMGEXP`** columns record a multiplier for each observation where we have Hundred (H), Thousand (K), Million (M) and Billion (B).
+```{r echo = TRUE, cache=TRUE}
+data_conversion <- function(dataset = new_stormData, fieldname, new_fieldname) {
+    totalLen <- dim(dataset)[2]
+    index <- which(colnames(dataset) == fieldname)
+    dataset[, index] <- as.character(dataset[, index])
+    logic <- !is.na(toupper(dataset[, index]))
+    dataset[logic & toupper(dataset[, index]) == "B", index] <- "9"
+    dataset[logic & toupper(dataset[, index]) == "M", index] <- "6"
+    dataset[logic & toupper(dataset[, index]) == "K", index] <- "3"
+    dataset[logic & toupper(dataset[, index]) == "H", index] <- "2"
+    dataset[logic & toupper(dataset[, index]) == "", index] <- "0"
+    dataset[, index] <- as.numeric(dataset[, index])
+    dataset[is.na(dataset[, index]), index] <- 0  ## NA or "" are in 0 
+    dataset <- cbind(dataset, dataset[, index - 1] * 10^dataset[, index])
+    names(dataset)[totalLen + 1] <- new_fieldname
+    return(dataset)
+}
+
+new_stormData <- data_conversion(new_stormData, "PROPDMGEXP", "PROPDMG_actuals")
+new_stormData <- data_conversion(new_stormData, "CROPDMGEXP", "CROPDMG_actuals")
+
+property_damages <- data_extraction("PROPDMG_actuals", dataset = new_stormData) 
+head(property_damages) # display property damage data
+
+crop_damages <- data_extraction("CROPDMG_actuals", dataset = new_stormData) 
+head(crop_damages) # display crop damage data
+
+# plot weather events distribution correspond to numbers of injuries as well as fatalities
+PROPDMG_plot <- qplot(EVTYPE, data = property_damages, weight = PROPDMG_actuals, geom = "bar", binwidth = 1) + scale_y_continuous("Number of Property Damages") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Severe Weather Type") + ggtitle("Total Property Damage Caused By \n Severe Weather Events In U.S.\n From 1995 - 2011")
+
+CROPDMG_plot <- qplot(EVTYPE, data = crop_damages, weight = CROPDMG_actuals, geom = "bar", binwidth = 1) + scale_y_continuous("Number of Crop Damages") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + xlab("Severe Weather Type") + ggtitle("Total Crop Damage Caused By \n Severe Weather Events In U.S.\n From 1995 - 2011")
+
+grid.arrange(PROPDMG_plot, CROPDMG_plot, ncol = 2) #merge plots 
+options(scipen = 999) # turn on scientific notation
+```
+Similarly, the property damage was mostly caused by **flood** (with `r property_damages$PROPDMG_actuals[[1]]` records) and **hurricane/typhoon** (with `r property_damages$PROPDMG_actuals[[2]]` records), while crop damage was mostly caused by **drought** (with `r crop_damages$CROPDMG_actuals[[1]]` records) and **flood** (with `r crop_damages$CROPDMG_actuals[[2]]` records) in the United States from 1995 to 2011.
+
+## Conclusion  
+In sum, weather events such as **excessive heat** and **tornado** are amongst highest destructive factors with respect to population health, while **flood**, **drought**, and **hurricane/typhoon** cause the greatest economic consequences.
